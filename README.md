@@ -26,7 +26,7 @@ transactions = client.get_transactions(category_id=category_id)
 from ynab import Client
 
 client = Client('<token>')
-payee_id = client.get_payee_id('gas')
+payee_id = client.get_payee_id('Gas Co.')
 transactions = client.get_transactions(payee_id=payee_id)
 ```
 
@@ -55,9 +55,7 @@ client.get_category_id('gas', group_name='house')
 from ynab import Client
 
 client = Client('<token>')
-
-client.get_payee_id('gas')  # first group if name is not unique
-client.get_payee_id('gas', group_name='house')
+client.get_payee_id('Gas Co.')
 ```
 
 #### Get accounts
