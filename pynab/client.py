@@ -224,10 +224,10 @@ class Client(CacheMeOutside):
                 budget_id=self.get_budget_id()))['data']['payees']
 
     def get_payee_id(self, name, group_name=None):
-        """Return category-id or None.
+        """Return payee-id or None.
 
         If no group_name is given,
-        then return first category that matches
+        then return first payee that matches
         """
         payees = self.get_payees()
 
@@ -256,4 +256,3 @@ class Client(CacheMeOutside):
                 payee_id=payee_id)
 
         return self.get(url)['data']['transactions']
-
