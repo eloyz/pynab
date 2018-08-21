@@ -1,8 +1,10 @@
 """YNAB Client written in Python."""
+from collections import defaultdict
 import json
 import logging
 import os
 import shutil
+from uuid import UUID
 
 import arrow
 import requests
@@ -25,18 +27,34 @@ class CacheMeOutside:
         """Set cache directories and template."""
         self.cache_directory = os.path.join(ROOT, 'cache')
         self.cache_path_template = os.path.join(self.cache_directory, '{}.json')
-        self._cache_dict = {}
+        self._cache_dict = defaultdict(dict)
 
-    def cache(self, name, data):
+    def is_uuid(self, string):
+        """Check if string is UUID."""
+        try:
+            UUID(string)
+            return True
+        except ValueError:
+            return False
+
+    def cache(self, key1, key2, data):
         """Cache at both memory and file level."""
-        cache_key = name.strip().lower().replace('/', '_')
-        self._cache_dict[cache_key] = data
-        self.to_file(cache_key, data)
+        if key2 is None:
+            # Update multiple items
+            self._cache_dict.get(key1, {}).update(data)
+        else:
+            # Update item
+            self._cache_dict.get(key1, {})[key2] = data
+            data_from_file = self.from_file(key1)
+            data_from_file.update(data)
+            data = data_from_file
+
+        self.to_file(key1, data)
         return data
 
     def clear_cache(self):
         """Clear memory and file level cache."""
-        self._cache_dict = {}
+        self._cache_dict = defaultdict(dict)
         shutil.rmtree('{}/'.format(self.cache_directory))
 
     def to_file(self, name, data):
@@ -57,21 +75,21 @@ class CacheMeOutside:
 
         return json.loads(data)
 
-    def get_from_cache(self, name):
+    def get_from_cache(self, cache_key):
         """Use hiearchy of caches to retreive data."""
-        cache_key = name.strip().lower().replace('/', '_')
-
         # log if hit in memory cache and return
         if cache_key in self._cache_dict:
-            logger.debug('read from memory: %s', name)
+            logger.info('read from memory: %s', cache_key)
             return self._cache_dict[cache_key]
 
         # get via file cache; save results in memory
-        self._cache_dict[cache_key] = self.from_file(cache_key)
+        data = self.from_file(cache_key)
+        if data is not None:
+            self._cache_dict[cache_key] = data
 
         # log if hit in file cache
         if self._cache_dict[cache_key]:
-            logger.debug('read from file %s', name)
+            logger.info('read from file %s', cache_key)
 
         return self._cache_dict.get(cache_key)
 
@@ -107,6 +125,48 @@ class Client(CacheMeOutside):
         # Used for debugging; dig into the http response
         self.last_response = None
 
+    def pluralize(self, string):
+        """Pluralize cache keys."""
+        last_letter = string.lower()[:-1]
+
+        if last_letter == 'y':
+            string = '%s_groups'.format(string)
+
+        return '%ss'.format(string)
+
+    def get_key(self, url_path):
+        """Get key.
+
+        Duplicate fn, but time constrained.
+        """
+        almost_tail, tail = url_path.split('/')[-2:]
+
+        if self.is_uuid(tail):
+            cache_key = self.pluralize(almost_tail)
+        else:
+            cache_key = tail
+
+        return cache_key
+
+    def get_keys_and_data(self, url_path, data):
+        """Get keys and data based on url_path."""
+        almost_tail, tail = url_path.split('/')[-2:]
+
+        if self.is_uuid(tail):
+            cache_key = self.pluralize(almost_tail)
+            cache_uuid = tail
+            data = data['data'][almost_tail]
+        else:
+            cache_key = tail
+            cache_uuid = None
+
+            if tail == 'categories':
+                tail = 'category_groups'
+
+            data = {item['id']: item for item in data['data'][tail]}
+
+        return cache_key, cache_uuid, data
+
     def set_budget_id(self, budget_id):
         """Set budget_id."""
         self._budget_id = budget_id
@@ -119,7 +179,7 @@ class Client(CacheMeOutside):
         - read from cache first
         """
         if use_cache and self.use_cache:
-            response = self.get_from_cache(url)
+            response = self.get_from_cache(self.get_key(url))
 
         # Found in cache; exit
         if response:
@@ -137,7 +197,8 @@ class Client(CacheMeOutside):
 
         # save in cache
         if response.status_code == 200:
-            self.cache(url, response.json())
+            key1, key2, data = self.get_keys_and_data(url, response.json())
+            self.cache(key1, key2, data)
         else:
             logger.warning('%s %s', response.status_code, url)
 
@@ -165,11 +226,11 @@ class Client(CacheMeOutside):
         """Return accounts."""
         return self.get(
             '/budgets/{budget_id}/accounts'.format(
-                budget_id=self.get_budget_id()))['data']['accounts']
+                budget_id=self.get_budget_id()))
 
     def get_budgets(self):
         """Return budgets."""
-        return self.get('/budgets')['data']['budgets']
+        return self.get('/budgets')
 
     def get_budget_id(self, name=None):
         """Return budget-id or None.
@@ -178,7 +239,7 @@ class Client(CacheMeOutside):
             * Set budget id
             * First budget id
         """
-        budgets = self.get_budgets()
+        budgets = list(self.get_budgets().values())
         budget_id = None
 
         # try getting budget id via name
@@ -194,6 +255,7 @@ class Client(CacheMeOutside):
             budget_id = self._budget_id
 
         # try getting the first budget id in the list
+        # TODO: Switched to dict; unordered
         if budget_id is None:
             try:
                 budget_id = budgets[0]['id']
@@ -213,7 +275,7 @@ class Client(CacheMeOutside):
         """
         return self.get(
             '/budgets/{budget_id}/categories'.format(
-                budget_id=self.get_budget_id()))['data']['category_groups']
+                budget_id=self.get_budget_id()))
 
     def get_category_id(self, name, group_name=None):
         """Return category-id or None.
@@ -239,7 +301,7 @@ class Client(CacheMeOutside):
         """Return payees."""
         return self.get(
             '/budgets/{budget_id}/payees'.format(
-                budget_id=self.get_budget_id()))['data']['payees']
+                budget_id=self.get_budget_id()))
 
     def get_payee(self, payee_id):
         """Get payee."""
@@ -247,7 +309,7 @@ class Client(CacheMeOutside):
             budget_id=self.get_budget_id(),
             payee_id=payee_id)
 
-        response = self.get(url)['data']['payee']
+        response = self.get(url)
 
         return response
 
@@ -283,7 +345,7 @@ class Client(CacheMeOutside):
                 budget_id=self.get_budget_id(),
                 payee_id=payee_id)
 
-        return self.get(url)['data']['transactions']
+        return self.get(url)
 
     def post_transaction(
         self,
