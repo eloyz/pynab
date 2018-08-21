@@ -23,25 +23,22 @@ class CacheMeOutside:
         """Set cache directories and template."""
         self.cache_directory = os.path.join(ROOT, 'cache')
         self.cache_path_template = os.path.join(self.cache_directory, '{}.json')
-        self._ynab_cache = {}
+        self._cache_dict = {}
 
     def cache(self, name, data):
         """Cache at both memory and file level."""
         cache_key = name.strip().lower().replace('/', '_')
-        self._ynab_cache[cache_key] = data
+        self._cache_dict[cache_key] = data
         self.to_file(cache_key, data)
         return data
 
     def clear_cache(self):
         """Clear memory and file level cache."""
-        self._ynab_cache = {}
+        self._cache_dict = {}
         shutil.rmtree('{}/'.format(self.cache_directory))
 
     def to_file(self, name, data):
-        """Write data to file.
-
-        If file not found; blow up.
-        """
+        """Write data to file."""
         with open(self.cache_path_template.format(name), 'w') as f:
             f.write(json.dumps(data))
 
@@ -63,18 +60,18 @@ class CacheMeOutside:
         cache_key = name.strip().lower().replace('/', '_')
 
         # log if hit in memory cache and return
-        if cache_key in self._ynab_cache:
+        if cache_key in self._cache_dict:
             logger.debug('read from memory: %s', name)
-            return self._ynab_cache[cache_key]
+            return self._cache_dict[cache_key]
 
         # get via file cache; save results in memory
-        self._ynab_cache[cache_key] = self.from_file(cache_key)
+        self._cache_dict[cache_key] = self.from_file(cache_key)
 
         # log if hit in file cache
-        if self._ynab_cache[cache_key]:
+        if self._cache_dict[cache_key]:
             logger.debug('read from file %s', name)
 
-        return self._ynab_cache.get(cache_key)
+        return self._cache_dict.get(cache_key)
 
 
 class Client(CacheMeOutside):
