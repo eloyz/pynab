@@ -4,7 +4,9 @@ import logging
 import os
 import shutil
 
+import arrow
 import requests
+
 
 FORMAT = '%(name)s %(lineno)d: %(message)s'
 logging.basicConfig(format=FORMAT, level=logging.INFO)
@@ -142,6 +144,23 @@ class Client(CacheMeOutside):
         self.last_response = response
         return response.json()
 
+    def post(self, url, data_dict):
+        """POST request to YNAB API endpoint."""
+        # Get via API endpoint
+        post_url = '{base_url}{url}'.format(base_url=self.base_url, url=url)
+        response = self.session.post(url=post_url, data=json.dumps(data_dict))
+
+        # update rate_limit
+        if 'x-rate-limit' in response.headers:
+            self.rate_limit = response.headers['X-Rate-Limit']
+            logger.debug('after %s: rate limit: %s', url, self.rate_limit)
+
+        if response.status_code != 200:
+            logger.warning('%s %s %s', response.status_code, url, response.json())
+
+        self.last_response = response
+        return response.json()
+
     def get_accounts(self):
         """Return accounts."""
         return self.get(
@@ -222,6 +241,16 @@ class Client(CacheMeOutside):
             '/budgets/{budget_id}/payees'.format(
                 budget_id=self.get_budget_id()))['data']['payees']
 
+    def get_payee(self, payee_id):
+        """Get payee."""
+        url = '/budgets/{budget_id}/payees/{payee_id}'.format(
+            budget_id=self.get_budget_id(),
+            payee_id=payee_id)
+
+        response = self.get(url)['data']['payee']
+
+        return response
+
     def get_payee_id(self, name, group_name=None):
         """Return payee-id or None.
 
@@ -255,3 +284,47 @@ class Client(CacheMeOutside):
                 payee_id=payee_id)
 
         return self.get(url)['data']['transactions']
+
+    def post_transaction(
+        self,
+        memo,
+        date,
+        amount,
+        payee_id=None,
+        payee_name=None,
+        account_id=None,
+        category_id=None,
+        approved=True,
+        cleared=True
+    ):
+        """Post transaction."""
+        if not payee_id and not payee_name:
+            raise UserWarning("payee_id or payee_name is required")
+
+        amount = int(amount * 1000)
+        # payee_name = self.get_payee(payee_id)['name']
+
+        # Use 1st account if account_id is `None`
+        account_id = self.get_accounts()[0]['id'] if account_id is None else account_id
+
+        txn_dict = {
+            "account_id": account_id,
+            "date": arrow.get(date).isoformat(),
+            "amount": amount,
+            "payee_id": None,
+            "payee_name": None,
+            "category_id": category_id,
+            "memo": memo,
+            "cleared": "cleared" if cleared else "uncleared",
+            "approved": approved,
+            "flag_color": None,
+            "import_id": None,
+        }
+
+        if payee_id:
+            txn_dict['payee_id'] = payee_id
+        else:
+            txn_dict['payee_name'] = payee_name
+
+        url = '/budgets/{budget_id}/transactions'.format(budget_id=self.get_budget_id())
+        return self.post(url, {'transaction': txn_dict})['data']['transaction']
