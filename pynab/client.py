@@ -129,8 +129,9 @@ class Client(CacheMeOutside):
             url=url))
 
         # update rate_limit
-        self.rate_limit = response.headers['X-Rate-Limit']
-        logger.debug('after %s: rate limit: %s', url, self.rate_limit)
+        if 'x-rate-limit' in response.headers:
+            self.rate_limit = response.headers['x-rate-limit']
+            logger.debug('after %s: rate limit: %s', url, self.rate_limit)
 
         # save in cache
         if response.status_code == 200:
