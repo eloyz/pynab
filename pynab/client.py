@@ -96,7 +96,8 @@ class Client(CacheMeOutside):
 
         # initialize session
         self.session = requests.Session()
-        self.session.headers.update({'Authorization': 'Bearer {}'.format(self.token)})
+        self.session.headers['Authorization'] = 'Bearer {}'.format(self.token)
+        self.session.headers['Content-Type'] = 'application/json'
 
         self.use_cache = use_cache
 
