@@ -130,7 +130,7 @@ class Client(CacheMeOutside):
         last_letter = string.lower()[:-1]
 
         if last_letter == 'y':
-            string = '%s_groups'.format(string)
+            string = string.replace('y', 'ies')
 
         return '%ss'.format(string)
 
